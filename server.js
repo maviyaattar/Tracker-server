@@ -12,25 +12,22 @@ app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 
-// Root route
 app.get("/", (req, res) => {
     res.send("🚀 Multi-Image Resend Server Running Successfully!");
 });
 
-// Ensure uploads folder exists
+// uploads folder
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
-// Multer setup (multiple files allowed)
+// multer multi-upload
 const storage = multer.diskStorage({
     destination: uploadsDir,
-    filename: (_, file, cb) => {
-        cb(null, `${Date.now()}_${file.originalname}`);
-    }
+    filename: (_, file, cb) => cb(null, `${Date.now()}_${file.originalname}`)
 });
 const upload = multer({ storage });
 
-// Resend email sender
+// resend email sender
 async function sendEmail({ to, subject, html }) {
     try {
         await axios.post(
@@ -48,41 +45,36 @@ async function sendEmail({ to, subject, html }) {
     }
 }
 
-// API: Multi-image upload + email
 app.post("/send", upload.array("images", 10), async (req, res) => {
     try {
         const { name, message, clientEmail } = req.body;
+        const fileList = req.files.map(f => f.filename).join("<br>");
 
-        // List of uploaded files
-        const fileNames = req.files.map(f => f.filename).join("<br>");
-
-        // Email to YOU
+        // email to you
         await sendEmail({
             to: ["maviyaattar4@gmail.com", "merajattar20@gmail.com"],
-            subject: "New Submission Received (Multi-Images)",
+            subject: "New Submission (Multi Images)",
             html: `
                 <p><strong>Name:</strong> ${name}</p>
                 <p><strong>Message:</strong> ${message}</p>
-                <p><strong>Uploaded Files:</strong><br>${fileNames}</p>
+                <p><strong>Uploaded Files:</strong><br>${fileList}</p>
             `
         });
 
-        // Email to client/user
+        // email to client
         await sendEmail({
             to: clientEmail || "maviyaattar4@gmail.com",
-            subject: "We received your submission!",
-            html: "<p>Thanks! Your details and images were received successfully.</p>"
+            subject: "Submission Received",
+            html: "<p>Your submission was received successfully.</p>"
         });
 
         res.json({ status: "success" });
 
     } catch (err) {
         console.error("❌ Server Error:", err);
-        res.status(500).json({ status: "error", message: "Server failed" });
+        res.status(500).json({ status: "error", message: "Server error" });
     }
 });
 
-// Start server
-app.listen(PORT, () => {
-    console.log("🚀 Server running on port:", PORT);
-});
+// start server
+app.listen(PORT, () => console.log("🚀 Server running on port:", PORT));
