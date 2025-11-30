@@ -52,7 +52,7 @@ app.post("/send", upload.array("images", 10), async (req, res) => {
 
         // email to you
         await sendEmail({
-            to: ["maviyaattar4@gmail.com", "merajattar20@gmail.com"],
+            to: ["maviyaattar4@gmail.com"],
             subject: "New Submission (Multi Images)",
             html: `
                 <p><strong>Name:</strong> ${name}</p>
