@@ -1,89 +1,88 @@
 const express = require("express");
 const multer = require("multer");
-const nodemailer = require("nodemailer");
-const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
+const cors = require("cors");
+const axios = require("axios");
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// 🚀 Render PORT support
 const PORT = process.env.PORT || 3000;
 
-// 🔓 Global CORS
-app.use(cors());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-
-// 🏠 Default route
+// Root route
 app.get("/", (req, res) => {
-    res.send("🚀 Server running successfully!");
+    res.send("🚀 Multi-Image Resend Server Running Successfully!");
 });
 
-// 📁 Ensure uploads folder exists
+// Ensure uploads folder exists
 const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
-}
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
-// 📸 Multer storage
+// Multer setup (multiple files allowed)
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadsDir);
-    },
-    filename: function (req, file, cb) {
-        const unique = `photo_${Date.now()}_${Math.floor(Math.random() * 10000)}.jpg`;
-        cb(null, unique);
+    destination: uploadsDir,
+    filename: (_, file, cb) => {
+        cb(null, `${Date.now()}_${file.originalname}`);
     }
 });
 const upload = multer({ storage });
 
-// 📧 Nodemailer transporter (YOUR EMAIL + APP PASSWORD)
-const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-        user: "maviyaattar4@gmail.com",
-        pass: "rwav vpsq ppcg wvaj"
-    }
-});
-
-// 🚀 API: Upload + Email Send
-app.post("/send", upload.single("image"), async (req, res) => {
+// Resend email sender
+async function sendEmail({ to, subject, html }) {
     try {
-        const { name, message } = req.body;
-        const filePath = req.file ? req.file.path : null;
+        await axios.post(
+            "https://api.resend.com/emails",
+            { from: "onboarding@resend.dev", to, subject, html },
+            {
+                headers: {
+                    Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+    } catch (err) {
+        console.error("❌ Resend Error:", err.response?.data || err.message);
+    }
+}
 
-        // 📩 Email #1 → To YOU (Meraj + Maviya)
-        const mailToYou = {
-            from: "maviyaattar4@gmail.com",
-            to: ["merajattar20@gmail.com", "maviyaattar4@gmail.com"],
-            subject: "New Submission Received",
-            text: `Name: ${name}\nMessage: ${message}`,
-            attachments: filePath
-                ? [{ filename: req.file.filename, path: filePath }]
-                : []
-        };
+// API: Multi-image upload + email
+app.post("/send", upload.array("images", 10), async (req, res) => {
+    try {
+        const { name, message, clientEmail } = req.body;
 
-        // 📩 Email #2 → To client/user (if needed)
-        const mailToClient = {
-            from: "maviyaattar4@gmail.com",
-            to: req.body.clientEmail || "maviyaattar4@gmail.com",
-            subject: "Thanks for your submission!",
-            text: "We received your entry successfully."
-        };
+        // List of uploaded files
+        const fileNames = req.files.map(f => f.filename).join("<br>");
 
-        await transporter.sendMail(mailToYou);
-        await transporter.sendMail(mailToClient);
+        // Email to YOU
+        await sendEmail({
+            to: ["maviyaattar4@gmail.com", "merajattar20@gmail.com"],
+            subject: "New Submission Received (Multi-Images)",
+            html: `
+                <p><strong>Name:</strong> ${name}</p>
+                <p><strong>Message:</strong> ${message}</p>
+                <p><strong>Uploaded Files:</strong><br>${fileNames}</p>
+            `
+        });
 
-        return res.json({ status: "success", message: "Email sent successfully" });
+        // Email to client/user
+        await sendEmail({
+            to: clientEmail || "maviyaattar4@gmail.com",
+            subject: "We received your submission!",
+            html: "<p>Thanks! Your details and images were received successfully.</p>"
+        });
+
+        res.json({ status: "success" });
 
     } catch (err) {
-        console.error("❌ ERROR:", err);
-        return res.status(500).json({ status: "error", message: "Something went wrong" });
+        console.error("❌ Server Error:", err);
+        res.status(500).json({ status: "error", message: "Server failed" });
     }
 });
 
-// 🚀 Start Server
+// Start server
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log("🚀 Server running on port:", PORT);
 });
