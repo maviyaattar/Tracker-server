@@ -1,80 +1,105 @@
 const express = require("express");
-const multer = require("multer");
-const fs = require("fs");
-const path = require("path");
 const cors = require("cors");
-const axios = require("axios");
+const multer = require("multer");
+const mongoose = require("mongoose");
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+
+require("dotenv").config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const PORT = process.env.PORT || 3000;
+// ----------------------
+// MONGODB CONNECTION
+// ----------------------
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("✔ MongoDB connected"))
+  .catch(err => console.log("❌ MongoDB Error:", err));
 
-app.get("/", (req, res) => {
-    res.send("🚀 Multi-Image Resend Server Running Successfully!");
+// ----------------------
+// CLOUDINARY CONFIG
+// ----------------------
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.CLOUD_API_KEY,
+  api_secret: process.env.CLOUD_API_SECRET
 });
 
-// uploads folder
-const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
-
-// multer multi-upload
-const storage = multer.diskStorage({
-    destination: uploadsDir,
-    filename: (_, file, cb) => cb(null, `${Date.now()}_${file.originalname}`)
+// ----------------------
+// CLOUDINARY STORAGE
+// ----------------------
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "tracker_images",
+    allowed_formats: ["jpg", "jpeg", "png"]
+  }
 });
 const upload = multer({ storage });
 
-// resend email sender
-async function sendEmail({ to, subject, html }) {
-    try {
-        await axios.post(
-            "https://api.resend.com/emails",
-            { from: "onboarding@resend.dev", to, subject, html },
-            {
-                headers: {
-                    Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-                    "Content-Type": "application/json"
-                }
-            }
-        );
-    } catch (err) {
-        console.error("❌ Resend Error:", err.response?.data || err.message);
-    }
-}
-
-app.post("/send", upload.array("images", 10), async (req, res) => {
-    try {
-        const { name, message, clientEmail } = req.body;
-        const fileList = req.files.map(f => f.filename).join("<br>");
-
-        // email to you
-        await sendEmail({
-            to: ["maviyaattar4@gmail.com"],
-            subject: "New Submission (Multi Images)",
-            html: `
-                <p><strong>Name:</strong> ${name}</p>
-                <p><strong>Message:</strong> ${message}</p>
-                <p><strong>Uploaded Files:</strong><br>${fileList}</p>
-            `
-        });
-
-        // email to client
-        await sendEmail({
-            to: clientEmail || "maviyaattar4@gmail.com",
-            subject: "Submission Received",
-            html: "<p>Your submission was received successfully.</p>"
-        });
-
-        res.json({ status: "success" });
-
-    } catch (err) {
-        console.error("❌ Server Error:", err);
-        res.status(500).json({ status: "error", message: "Server error" });
-    }
+// ----------------------
+// MONGOOSE SCHEMA (NO MODEL FOLDER NEEDED)
+// ----------------------
+const entrySchema = new mongoose.Schema({
+  ip: String,
+  location: String,
+  device: String,
+  browser: String,
+  message: String,
+  photos: [String],
+  time: { type: Date, default: Date.now }
 });
 
-// start server
+const Entry = mongoose.model("Entry", entrySchema);
+
+// ----------------------
+// TEST ROUTE
+// ----------------------
+app.get("/", (req, res) => {
+  res.send("🚀 Tracker Server Running (DB + Cloudinary Active)");
+});
+
+// ----------------------
+// SAVE ENTRY (UPLOAD + DB SAVE)
+// ----------------------
+app.post("/send", upload.array("images", 10), async (req, res) => {
+  try {
+    const { ip, location, device, browser, message } = req.body;
+
+    // Cloudinary URLs
+    const imageURLs = req.files.map(f => f.path);
+
+    await Entry.create({
+      ip,
+      location,
+      device,
+      browser,
+      message,
+      photos: imageURLs,
+      time: new Date()
+    });
+
+    res.json({ status: "success" });
+
+  } catch (err) {
+    console.error("❌ Server Error:", err);
+    res.status(500).json({ status: "error", error: err.message });
+  }
+});
+
+// ----------------------
+// FETCH ALL ENTRIES
+// ----------------------
+app.get("/all", async (req, res) => {
+  const data = await Entry.find().sort({ time: -1 });
+  res.json(data);
+});
+
+// ----------------------
+// START SERVER
+// ----------------------
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("🚀 Server running on port:", PORT));
