@@ -1,48 +1,48 @@
+// -----------------------------------------
+// 📌 IMPORTS
+// -----------------------------------------
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const mongoose = require("mongoose");
-const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
-
+const { v2: cloudinary } = require("cloudinary");
+const fs = require("fs");
 require("dotenv").config();
 
+// -----------------------------------------
+// 📌 APP SETUP
+// -----------------------------------------
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// ----------------------
-// MONGODB CONNECTION
-// ----------------------
-mongoose.connect(process.env.MONGO_URI)
+const PORT = process.env.PORT || 10000;
+
+// -----------------------------------------
+// 📌 MONGO CONNECT
+// -----------------------------------------
+mongoose
+  .connect("mongodb+srv://Maviya:maviya@cluster0.hrhvss3.mongodb.net/?retryWrites=true&w=majority")
   .then(() => console.log("✔ MongoDB connected"))
-  .catch(err => console.log("❌ MongoDB Error:", err));
+  .catch(err => console.log("❌ Mongo error:", err));
 
-// ----------------------
-// CLOUDINARY CONFIG
-// ----------------------
+// -----------------------------------------
+// 📌 CLOUDINARY CONFIG
+// -----------------------------------------
 cloudinary.config({
-  cloud_name: process.env.CLOUD_NAME,
-  api_key: process.env.CLOUD_API_KEY,
-  api_secret: process.env.CLOUD_API_SECRET
+  cloud_name: "dgt4rfzqb",
+  api_key: "654113358245137",
+  api_secret: "PvU8z3ZRF8ciW_F-XD7TOcYSEnE"
 });
 
-// ----------------------
-// CLOUDINARY STORAGE
-// ----------------------
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: "tracker_images",
-    allowed_formats: ["jpg", "jpeg", "png"]
-  }
-});
-const upload = multer({ storage });
+// -----------------------------------------
+// 📌 MULTER (TEMP STORAGE)
+// -----------------------------------------
+const upload = multer({ dest: "uploads/" });
 
-// ----------------------
-// MONGOOSE SCHEMA (NO MODEL FOLDER NEEDED)
-// ----------------------
+// -----------------------------------------
+// 📌 MONGO MODEL
+// -----------------------------------------
 const entrySchema = new mongoose.Schema({
   ip: String,
   location: String,
@@ -55,51 +55,97 @@ const entrySchema = new mongoose.Schema({
 
 const Entry = mongoose.model("Entry", entrySchema);
 
-// ----------------------
-// TEST ROUTE
-// ----------------------
+// -----------------------------------------
+// 📌 ROUTE: TEST
+// -----------------------------------------
 app.get("/", (req, res) => {
-  res.send("🚀 Tracker Server Running (DB + Cloudinary Active)");
+  res.send("🚀 Tracker Server Running!");
 });
 
-// ----------------------
-// SAVE ENTRY (UPLOAD + DB SAVE)
-// ----------------------
+// -----------------------------------------
+// 📌 ROUTE: SEND ENTRY
+// -----------------------------------------
 app.post("/send", upload.array("images", 10), async (req, res) => {
   try {
     const { ip, location, device, browser, message } = req.body;
 
-    // Cloudinary URLs
-    const imageURLs = req.files.map(f => f.path);
+    let photoUrls = [];
 
+    // upload each image to cloudinary
+    for (let file of req.files) {
+      const result = await cloudinary.uploader.upload(file.path, {
+        folder: "tracker_images"
+      });
+
+      photoUrls.push(result.secure_url);
+
+      // delete temp file
+      fs.unlinkSync(file.path);
+    }
+
+    // create db entry
     await Entry.create({
       ip,
       location,
       device,
       browser,
       message,
-      photos: imageURLs,
-      time: new Date()
+      photos: photoUrls
     });
 
     res.json({ status: "success" });
-
   } catch (err) {
-    console.error("❌ Server Error:", err);
-    res.status(500).json({ status: "error", error: err.message });
+    console.error("❌ SEND ERROR:", err);
+    res.json({ status: "error", message: "Server error" });
   }
 });
 
-// ----------------------
-// FETCH ALL ENTRIES
-// ----------------------
+// -----------------------------------------
+// 📌 ROUTE: GET ALL ENTRIES (ADMIN)
+// -----------------------------------------
 app.get("/all", async (req, res) => {
-  const data = await Entry.find().sort({ time: -1 });
-  res.json(data);
+  try {
+    const list = await Entry.find().sort({ time: -1 });
+    res.json(list);
+  } catch (err) {
+    console.error("❌ ALL ERROR:", err);
+    res.json([]);
+  }
 });
 
-// ----------------------
-// START SERVER
-// ----------------------
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🚀 Server running on port:", PORT));
+// -----------------------------------------
+// 📌 ROUTE: REAL DELETE
+// -----------------------------------------
+app.delete("/delete/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const entry = await Entry.findById(id);
+    if (!entry) return res.json({ status: "error", message: "Not found" });
+
+    // delete cloudinary images
+    for (let url of entry.photos) {
+      try {
+        const parts = url.split("/");
+        const filename = parts[parts.length - 1];
+        const publicId = "tracker_images/" + filename.split(".")[0];
+        await cloudinary.uploader.destroy(publicId);
+      } catch (err) {
+        console.log("❌ Cloudinary delete issue:", err.message);
+      }
+    }
+
+    // delete from Mongo
+    await Entry.findByIdAndDelete(id);
+
+    res.json({ status: "success" });
+  } catch (err) {
+    console.error("❌ DELETE ERROR:", err);
+    res.json({ status: "error" });
+  }
+});
+
+// -----------------------------------------
+// 📌 START SERVER
+// -----------------------------------------
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
